@@ -1,0 +1,5 @@
+tree-sitter
+llama-index
+chromadb
+ollama
+tree-sitter-language-pack
