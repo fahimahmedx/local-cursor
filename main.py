@@ -1,7 +1,9 @@
 import os
 from pathlib import Path
 from typing import List
-
+from llama_index.core.node_parser import CodeSplitter
+import ollama
+import chromadb
 
 def iter_file_paths(root_directory: str) -> List[Path]:
     """Returns a list of all file paths under the given root directory recursively.
@@ -34,7 +36,7 @@ def iter_file_paths(root_directory: str) -> List[Path]:
 
         for file_name in file_names:
             candidate_path = Path(current_dir) / file_name # this concatenates the current directory with the file name
-            if candidate_path.is_file():
+            if candidate_path.is_file() and candidate_path.suffix == ".py":
                 file_paths.append(candidate_path)
     return file_paths
 
@@ -62,10 +64,69 @@ def print_all_file_contents(root_directory: str) -> None:
         print()
 
 
+def create_file_embeddings(root_directory: str) -> List[str]:
+    """Embed all files under the given root directory using ollama.
+
+    The embeddings are returned as a list of strings.
+    """
+    file_embeddings = []
+    code_splitter = CodeSplitter.from_defaults(language="python")
+
+    root_path = Path(root_directory).resolve()
+    for file_path in iter_file_paths(str(root_path)):
+        file_contents = ""
+
+        try:
+            with open(file_path, mode="r", encoding="utf-8", errors="replace") as file_handle:
+                for line in file_handle:
+                    file_contents += line
+
+            file_embeddings.extend(code_splitter.split_text(file_contents))
+        except Exception as error:  # noqa: BLE001 - bubble context to output
+            # ^ the comment above is a linter surpression
+            print(f"[Error reading {file_path}]: {error}")
+
+    return file_embeddings
+
+
+def store_file_embeddings(client: chromadb.Client, file_embeddings: List[str]) -> None:
+    """Store the file embeddings in the vector embedding database."""
+    collection = client.create_collection(name="docs")
+
+    # store each document in a vector embedding database
+    for i, d in enumerate(file_embeddings):
+        response = ollama.embed(model="mxbai-embed-large", input=d)
+        embeddings = response["embeddings"]
+        collection.add(
+            ids=[str(i)],
+            embeddings=embeddings,
+            documents=[d]
+        )
+
+
+def retrieve_relevant_chunks(client: chromadb.Client, query: str) -> List[str]:
+    """Retrieve the most relevant chunks from the vector embedding database."""
+    collection = client.get_collection(name="docs")
+    results = collection.query(
+        query_texts=[query],
+        n_results=10 # 10 chunks to retrieve
+    )
+    return results
+
 if __name__ == "__main__":
     import sys
 
     target_root = sys.argv[1] if len(sys.argv) > 1 else "."
-    print_all_file_contents(target_root)
+    file_embeddings = create_file_embeddings(target_root)
+
+    client = chromadb.Client()
+
+    store_file_embeddings(client, file_embeddings)
+
+    relevant_chunks = retrieve_relevant_chunks(client, "What is the main function of the program?")
+    print(relevant_chunks)
+
+
+
 
 
