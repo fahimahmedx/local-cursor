@@ -4,6 +4,7 @@ from typing import List
 from llama_index.core.node_parser import CodeSplitter
 import ollama
 import chromadb
+from pprint import pprint
 
 def iter_file_paths(root_directory: str) -> List[Path]:
     """Returns a list of all file paths under the given root directory recursively.
@@ -91,15 +92,16 @@ def create_file_embeddings(root_directory: str) -> List[str]:
 
 def store_file_embeddings(client: chromadb.Client, file_embeddings: List[str]) -> None:
     """Store the file embeddings in the vector embedding database."""
-    collection = client.create_collection(name="docs")
+    collection = client.get_or_create_collection(name="docs")
 
     # store each document in a vector embedding database
     for i, d in enumerate(file_embeddings):
         response = ollama.embed(model="mxbai-embed-large", input=d)
-        embeddings = response["embeddings"]
+        response_embeddings = response["embeddings"]
+
         collection.add(
             ids=[str(i)],
-            embeddings=embeddings,
+            embeddings=response_embeddings,
             documents=[d]
         )
 
@@ -107,9 +109,13 @@ def store_file_embeddings(client: chromadb.Client, file_embeddings: List[str]) -
 def retrieve_relevant_chunks(client: chromadb.Client, query: str) -> List[str]:
     """Retrieve the most relevant chunks from the vector embedding database."""
     collection = client.get_collection(name="docs")
+    # use the SAME embedding model as used for indexing to avoid dimension mismatch
+    response = ollama.embed(model="mxbai-embed-large", input=query)
+    response_embeddings = response["embeddings"]
+
     results = collection.query(
-        query_texts=[query],
-        n_results=10 # 10 chunks to retrieve
+        query_embeddings=response_embeddings,
+        n_results=3 # 3 chunks to retrieve
     )
     return results
 
@@ -124,8 +130,8 @@ if __name__ == "__main__":
     store_file_embeddings(client, file_embeddings)
 
     relevant_chunks = retrieve_relevant_chunks(client, "What is the main function of the program?")
-    print(relevant_chunks)
-
+    
+    pprint(relevant_chunks["documents"])
 
 
 
