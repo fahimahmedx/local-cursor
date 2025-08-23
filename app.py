@@ -157,8 +157,28 @@ def generate_answer(query: str, contexts: List[str]) -> str:
         + "\n\nAnswer:"
     )
 
-    resp = ollama.chat(model="deepseek-r1:8b", messages=[{"role": "user", "content": prompt}])
+    resp = ollama.chat(model="deepseek-r1:1.5b", messages=[{"role": "user", "content": prompt}])
     return resp["message"]["content"]
+
+def parse_answer_with_thinking(answer: str) -> tuple[str, str]:
+    """
+    Parse an answer that may contain <think>...</think> tags.
+    Returns (thinking_content, main_answer).
+    If no thinking tags found, returns ("", original_answer).
+    """
+    import re
+    
+    # Look for <think>...</think> pattern
+    think_pattern = r'<think>(.*?)</think>'
+    match = re.search(think_pattern, answer, re.DOTALL)
+    
+    if match:
+        thinking_content = match.group(1).strip()
+        # Remove the thinking tags and content from the main answer
+        main_answer = re.sub(think_pattern, '', answer, flags=re.DOTALL).strip()
+        return thinking_content, main_answer
+    else:
+        return "", answer
 
 # Everything below this is the Streamlit UI, and was GPT generated.
 # streamlit run app.py
@@ -222,8 +242,16 @@ else:
         # Generate answer
         with st.chat_message("assistant"):
             with st.spinner("Thinking..."):
-                answer = generate_answer(user_input, contexts)
-                st.markdown(answer)
+                full_answer = generate_answer(user_input, contexts)
+                thinking_content, main_answer = parse_answer_with_thinking(full_answer)
+                
+                # Show the main answer
+                st.markdown(main_answer)
+                
+                # Show thinking in expander if present
+                if thinking_content:
+                    with st.expander("Thinking process"):
+                        st.markdown(thinking_content)
 
                 # Show sources
                 with st.expander("Relevant code snippets"):
@@ -232,4 +260,4 @@ else:
                         st.markdown(f"**{i}. {src}**  (distance: {dist:.4f})")
                         st.code(doc, language="python")
 
-        st.session_state.messages.append(("assistant", answer))
+        st.session_state.messages.append(("assistant", main_answer))
