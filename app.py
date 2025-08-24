@@ -343,6 +343,13 @@ else:
 
         # Generate answer with streaming
         with st.chat_message("assistant"):
+            # show code context in dropdown menu
+            with st.expander("Relevant code snippets"):
+                for i, (doc, meta, dist) in enumerate(hits, start=1):
+                    src = meta.get("source") if isinstance(meta, dict) else meta
+                    st.markdown(f"**{i}. {src}**  (distance: {dist:.4f})")
+                    st.code(doc, language="python")
+            
             # Create containers for different parts of the response
             thinking_container = st.empty()
             main_answer_container = st.empty()
@@ -359,6 +366,7 @@ else:
                         thinking_visible = True
                     # Update thinking display in real-time
                     with thinking_container.container():
+                        # expanded=True means the thinking process is shown by default
                         with st.expander("Thinking process", expanded=True):
                             st.markdown(thinking_content + "▋")  # Add cursor to show it's streaming
                 else:
@@ -373,7 +381,8 @@ else:
             # Final update without the ▋ cursor
             if thinking_content:
                 with thinking_container.container():
-                    with st.expander("Thinking process", expanded=False):
+                    # the final thinking process is optional to view, so we don't expand the dropdown menu default
+                    with st.expander("Thinking process"):
                         st.markdown(thinking_content)
             else:
                 thinking_container.empty()
@@ -382,12 +391,5 @@ else:
                 main_answer_container.markdown(main_answer)
             else:
                 main_answer_container.markdown("I couldn't generate a response. Please try again.")
-
-            # Show sources
-            with st.expander("Relevant code snippets"):
-                for i, (doc, meta, dist) in enumerate(hits, start=1):
-                    src = meta.get("source") if isinstance(meta, dict) else meta
-                    st.markdown(f"**{i}. {src}**  (distance: {dist:.4f})")
-                    st.code(doc, language="python")
 
         st.session_state.messages.append(("assistant", main_answer))
