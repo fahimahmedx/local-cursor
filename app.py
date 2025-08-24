@@ -344,6 +344,16 @@ if is_macos:
             selected = select_folder_macos()
             if selected:
                 st.session_state.selected_folder = selected
+                # Automatically index the selected codebase
+                abs_root = str(Path(selected).resolve())
+                if Path(abs_root).is_dir():
+                    with st.spinner("Indexing codebase..."):
+                        name = index_codebase(abs_root)
+                        st.session_state.collection_name = name
+                        st.session_state.abs_root = abs_root
+                        st.sidebar.success(f"Indexed: {abs_root}")
+                else:
+                    st.sidebar.error("Invalid folder path.")
                 st.rerun()  # Rerun to update the UI with the new selection
 else:
     st.sidebar.error("⚠️ This app currently only supports macOS folder selection.")
@@ -354,23 +364,9 @@ if st.session_state.selected_folder:
 else:
     st.sidebar.warning("No folder selected. Please choose a codebase.")
 
-# Index and Reindex buttons
-col1, col2 = st.sidebar.columns(2)
-with col1:
-    do_index = st.button("Index", disabled=not st.session_state.selected_folder)
-with col2:
-    do_reindex = st.button("Reindex", disabled=not st.session_state.selected_folder)
+# reindex button for when the user updates their codebase and wants to reindex it.
+do_reindex = st.sidebar.button("Reindex", disabled=not st.session_state.selected_folder, use_container_width=True)
 
-if do_index and st.session_state.selected_folder:
-    abs_root = str(Path(st.session_state.selected_folder).resolve())
-    if Path(abs_root).is_dir():
-        name = index_codebase(abs_root)
-        st.session_state.collection_name = name
-        st.session_state.abs_root = abs_root
-        st.sidebar.success(f"Indexed: {abs_root}")
-    else:
-        st.sidebar.error("Invalid folder path.")
-        
 if do_reindex and st.session_state.selected_folder:
     abs_root = str(Path(st.session_state.selected_folder).resolve())
     if Path(abs_root).is_dir():
