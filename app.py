@@ -7,6 +7,8 @@ import streamlit as st
 from llama_index.core.node_parser import CodeSplitter
 import chromadb
 import ollama
+import subprocess
+import platform
 
 
 def iter_file_paths(root_directory: str) -> List[Path]:
@@ -282,6 +284,41 @@ def parse_answer_with_thinking(answer: str) -> tuple[str, str]:
     else:
         return "", answer
 
+def select_folder_macos():
+    """
+    Opens a native macOS folder selection dialog using AppleScript.
+    Returns the selected folder path or None if cancelled.
+    """
+    try:
+        # AppleScript to open folder picker
+        applescript = '''
+        tell application "System Events"
+            activate
+            set folderPath to choose folder with prompt "Select your codebase folder:"
+            return POSIX path of folderPath
+        end tell
+        '''
+        
+        # Run AppleScript via osascript command
+        result = subprocess.run(
+            ['osascript', '-e', applescript],
+            capture_output=True,
+            text=True,
+            timeout=60  # 60 second timeout for user to select
+        )
+        
+        if result.returncode == 0 and result.stdout:
+            # Remove trailing newline and return the path
+            return result.stdout.strip()
+        return None
+        
+    except subprocess.TimeoutExpired:
+        st.warning("Folder selection timed out.")
+        return None
+    except Exception as e:
+        st.error(f"Error opening folder dialog: {e}")
+        return None
+
 # Everything below this is the Streamlit UI, and was GPT generated.
 # streamlit run app.py
 st.set_page_config(page_title="Codebase Chat", layout="wide")
@@ -292,17 +329,40 @@ if "abs_root" not in st.session_state:
     st.session_state.abs_root = None
 if "messages" not in st.session_state:
     st.session_state.messages = []
+if "selected_folder" not in st.session_state:
+    st.session_state.selected_folder = None
 
 st.sidebar.title("Codebase")
-root_input = st.sidebar.text_input("Folder path", value="", placeholder="/path/to/your/codebase")
+
+# Check if we're on macOS
+is_macos = platform.system() == "Darwin"
+
+if is_macos:
+    # Button to open native macOS folder picker
+    if st.sidebar.button("Browse for Folder", use_container_width=True, help="Click to open native folder picker"):
+        with st.spinner("Opening folder picker..."):
+            selected = select_folder_macos()
+            if selected:
+                st.session_state.selected_folder = selected
+                st.rerun()  # Rerun to update the UI with the new selection
+else:
+    st.sidebar.error("⚠️ This app currently only supports macOS folder selection.")
+
+# Display currently selected folder
+if st.session_state.selected_folder:
+    st.sidebar.success(f"Selected: {st.session_state.selected_folder}")
+else:
+    st.sidebar.warning("No folder selected. Please choose a codebase.")
+
+# Index and Reindex buttons
 col1, col2 = st.sidebar.columns(2)
 with col1:
-    do_index = st.button("Index")
+    do_index = st.button("Index", disabled=not st.session_state.selected_folder)
 with col2:
-    do_reindex = st.button("Reindex")
+    do_reindex = st.button("Reindex", disabled=not st.session_state.selected_folder)
 
-if do_index and root_input:
-    abs_root = str(Path(root_input).resolve())
+if do_index and st.session_state.selected_folder:
+    abs_root = str(Path(st.session_state.selected_folder).resolve())
     if Path(abs_root).is_dir():
         name = index_codebase(abs_root)
         st.session_state.collection_name = name
@@ -310,8 +370,9 @@ if do_index and root_input:
         st.sidebar.success(f"Indexed: {abs_root}")
     else:
         st.sidebar.error("Invalid folder path.")
-if do_reindex and root_input:
-    abs_root = str(Path(root_input).resolve())
+        
+if do_reindex and st.session_state.selected_folder:
+    abs_root = str(Path(st.session_state.selected_folder).resolve())
     if Path(abs_root).is_dir():
         name = reindex_codebase(abs_root)
         st.session_state.collection_name = name
@@ -323,7 +384,7 @@ if do_reindex and root_input:
 st.title("Chat with your codebase")
 
 if not st.session_state.collection_name:
-    st.info("Enter a folder path in the sidebar and click Index to get started.")
+    st.info("Select a folder in the sidebar and click Index to get started.")
 else:
     # Show chat history
     for role, content in st.session_state.messages:
