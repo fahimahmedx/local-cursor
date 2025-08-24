@@ -1,5 +1,6 @@
 import os
 import hashlib
+import time
 from pathlib import Path
 from typing import List, Dict, Any
 import streamlit as st
@@ -160,6 +161,107 @@ def generate_answer(query: str, contexts: List[str]) -> str:
     resp = ollama.chat(model="deepseek-r1:1.5b", messages=[{"role": "user", "content": prompt}])
     return resp["message"]["content"]
 
+# rather than using generate_answer(), we use this so the user can SEE the thinking process as it happens.
+# While I was building this app out, I realized the simple effect of streaming the thinking process
+# makes the app feel less slow (giving a better user experience), because the user sees something is happening
+# as opposed to it being frozen and showing the words "Thinking".
+def generate_answer_streaming(query: str, contexts: List[str]):
+    """
+    Generator function that yields chunks of the response as they arrive.
+    Returns tuples of (chunk_text, is_thinking, thinking_content, main_content)
+    """
+    prompt = (
+        "You are a helpful codebase assistant. Use the provided context snippets "
+        "to answer the user's question. If unsure, say so.\n\n"
+        "Question:\n"
+        f"{query}\n\n"
+        "Context snippets (may be partial):\n"
+        + "\n\n".join([f"Snippet {i+1}:\n{c}" for i, c in enumerate(contexts)])
+        + "\n\nAnswer:"
+    )
+
+    full_response = ""
+    thinking_content = ""
+    main_content = ""
+    in_thinking = False
+    
+    try:
+        stream = ollama.chat(
+            model="deepseek-r1:1.5b", 
+            messages=[{"role": "user", "content": prompt}],
+            stream=True
+        )
+        
+        for chunk in stream:
+            if chunk and 'message' in chunk and 'content' in chunk['message']:
+                chunk_text = chunk['message']['content']
+                full_response += chunk_text
+
+                # In the logic below, we're seperating the response (that we're streaming to the user) into 2 parts: thinking and main content.
+                # We're doing this by checking for <think> and </think> tags.
+                # If we find <think>, then we know we're in a thinking block and can add the content AFTER <think> to the thinking content, and before <think> to the main content.
+                # we the continue streaming content to the thinking_content, until we hit </think>.
+                # If we find </think>, we know we're at the end of the thinking block, and all content after </think> is main content.
+    
+                if '<think>' in chunk_text:
+                    in_thinking = True
+                    # content before <think> is main content
+                    before_think = chunk_text.split('<think>')[0]
+                    if before_think:
+                        main_content += before_think
+                        yield (before_think, False, thinking_content, main_content)
+                    
+                    # thinking content starts here
+                    after_think = chunk_text.split('<think>', 1)[1] if '<think>' in chunk_text else ""
+                    # if the <think> and </think> are in the same chunk, we can complete the thinking block in one chunk
+                    if '</think>' in after_think:
+                        # complete thinking block in one chunk
+                        think_part = after_think.split('</think>')[0]
+                        thinking_content += think_part
+                        yield (think_part, True, thinking_content, main_content)
+                        
+                        # main content after </think>
+                        after_think_end = after_think.split('</think>', 1)[1]
+                        main_content += after_think_end
+                        if after_think_end:
+                            yield (after_think_end, False, thinking_content, main_content)
+                        in_thinking = False
+                    else:
+                        thinking_content += after_think
+                        if after_think:
+                            yield (after_think, True, thinking_content, main_content)
+                        
+                elif '</think>' in chunk_text and in_thinking:
+                    # chunk contains end of thinking block
+                    before_end = chunk_text.split('</think>')[0]
+                    thinking_content += before_end
+                    if before_end:
+                        yield (before_end, True, thinking_content, main_content)
+                    
+                    # main content after </think>
+                    after_end = chunk_text.split('</think>', 1)[1]
+                    main_content += after_end
+                    if after_end:
+                        yield (after_end, False, thinking_content, main_content)
+                    in_thinking = False
+                    
+                elif in_thinking:
+                    # chunk is inside the thinking block
+                    thinking_content += chunk_text
+                    yield (chunk_text, True, thinking_content, main_content)
+                    
+                else:
+                    # chunk is after the thinking block
+                    main_content += chunk_text
+                    yield (chunk_text, False, thinking_content, main_content)
+                    
+    except Exception as e:
+        yield (f"Error during streaming: {e}", False, thinking_content, main_content)
+        
+    # return final parsed content. we use yield here because we're streaming the response.
+    final_thinking, final_main = parse_answer_with_thinking(full_response)
+    yield ("", False, final_thinking or thinking_content, final_main or main_content)
+
 def parse_answer_with_thinking(answer: str) -> tuple[str, str]:
     """
     Parse an answer that may contain <think>...</think> tags.
@@ -239,25 +341,53 @@ else:
         hits = retrieve_chunks(st.session_state.collection_name, user_input, k=5)
         contexts = [doc for (doc, meta, dist) in hits]
 
-        # Generate answer
+        # Generate answer with streaming
         with st.chat_message("assistant"):
-            with st.spinner("Thinking..."):
-                full_answer = generate_answer(user_input, contexts)
-                thinking_content, main_answer = parse_answer_with_thinking(full_answer)
+            # Create containers for different parts of the response
+            thinking_container = st.empty()
+            main_answer_container = st.empty()
+            
+            thinking_content = ""
+            main_answer = ""
+            thinking_visible = False
+            
+            # Stream the response
+            for chunk_text, is_thinking, full_thinking, full_main in generate_answer_streaming(user_input, contexts):
+                if is_thinking:
+                    thinking_content = full_thinking
+                    if not thinking_visible:
+                        thinking_visible = True
+                    # Update thinking display in real-time
+                    with thinking_container.container():
+                        with st.expander("Thinking process", expanded=True):
+                            st.markdown(thinking_content + "▋")  # Add cursor to show it's streaming
+                else:
+                    main_answer = full_main
+                    # Update main answer display
+                    if main_answer.strip():
+                        main_answer_container.markdown(main_answer + "▋")  # Add cursor to show it's streaming
                 
-                # Show the main answer
-                st.markdown(main_answer)
-                
-                # Show thinking in expander if present
-                if thinking_content:
-                    with st.expander("Thinking process"):
+                # Small delay to make streaming visible (and not too fast)
+                time.sleep(0.05)
+            
+            # Final update without the ▋ cursor
+            if thinking_content:
+                with thinking_container.container():
+                    with st.expander("Thinking process", expanded=False):
                         st.markdown(thinking_content)
+            else:
+                thinking_container.empty()
+                
+            if main_answer:
+                main_answer_container.markdown(main_answer)
+            else:
+                main_answer_container.markdown("I couldn't generate a response. Please try again.")
 
-                # Show sources
-                with st.expander("Relevant code snippets"):
-                    for i, (doc, meta, dist) in enumerate(hits, start=1):
-                        src = meta.get("source") if isinstance(meta, dict) else meta
-                        st.markdown(f"**{i}. {src}**  (distance: {dist:.4f})")
-                        st.code(doc, language="python")
+            # Show sources
+            with st.expander("Relevant code snippets"):
+                for i, (doc, meta, dist) in enumerate(hits, start=1):
+                    src = meta.get("source") if isinstance(meta, dict) else meta
+                    st.markdown(f"**{i}. {src}**  (distance: {dist:.4f})")
+                    st.code(doc, language="python")
 
         st.session_state.messages.append(("assistant", main_answer))
