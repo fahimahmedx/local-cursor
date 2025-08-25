@@ -42,8 +42,9 @@ I learned how to run an LLM locally via ollama, and how larger parameter sized m
 
 ## Next Steps
 
-A current limitation of this project is that it only analyzes Python codebases, but what if you have a codebase with multiple languages?
-To fix this, I can generalize the `chunk_python_code()` into `chunk_code(language)`, where if a file has a `.rs` suffix then `chunk_code("RUST")` gets called, and likewise with `.py` files calling `chunk_code("PYTHON")`.
+- A current limitation of this project is that it only analyzes Python codebases, but what if you have a codebase with multiple languages? To fix this, I can generalize the `chunk_python_code()` into `chunk_code(language)`, where if a file has a `.rs` suffix then `chunk_code("RUST")` gets called, and likewise with `.py` files calling `chunk_code("PYTHON")`.
+- Prompt engineering for better responses, such as by including a form of Cursor's leaked prompts: https://github.com/jujumilk3/leaked-system-prompts/blob/f7281fdbb4a5659c7daa69b3217c4f92610c7baa/cursor-ide-agent-claude-sonnet-3.7_20250309.md
+- Automatically re-indexing files if they get updated, by re-indexing the codebase if any "last modified time" times are later than the previous index time.
 
 ## Flow of How it Works
 
