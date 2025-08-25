@@ -3,3 +3,4 @@ llama-index
 chromadb
 ollama
 tree-sitter-language-pack
+streamlit
