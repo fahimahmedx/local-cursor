@@ -1,6 +1,8 @@
 # `local-cursor` - Local AI-Powered Python Codebase Assistant
 
-![Screenshot](screenshot.png)
+[![Video Demo](https://img.youtube.com/vi/zBoqAMS-yGI/maxresdefault.jpg)](https://youtu.be/zBoqAMS-yGI)
+
+*Click the thumbnail above or [this link](https://youtu.be/zBoqAMS-yGI) to watch the demo video*
 
 When I'm traveling on a plane, there isn't a way for my to prompt my codebase with Cursor due to no internet.
 But what if I could chat with my codebase locally? 
